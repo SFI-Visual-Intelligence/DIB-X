@@ -1,0 +1,388 @@
+'''
+print(y, np.bincount(cls, minlength=3))
+2014 [1378  407 2148]
+2015 [ 639  447 1269]
+2016 [1350  283 1694]
+2017 [ 657 1664  942]
+2018 [ 738 2256  635]  [4762, 5057, 6688]
+
+2019 [1607 1054 1596]
+                  sum  [6369, 6111, 8284]
+###########################
+tr set  3400 3400 3400
+te set  850 850 850 (2019)
+'''
+
+'''
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import os
+
+tr_years = [2014, 2015, 2016, 2017, 2018]
+te_years = [2019]
+
+tr_overview = np.asarray(
+    [[710, 256, 1118],
+     [630, 297, 599],
+     [705, 183, 888],
+     [650, 1124, 473],
+     [705, 1540, 322]])  # 2014-2018, each row
+
+te_overview = np.asarray(
+    [[850, 850, 850]])
+
+
+# ==============================================
+
+def idx_samplers(years):
+    year_patch_idx = []
+    for y in years:
+        loca = '/Users/changkyu/Documents/GitHub/semisup_seg_data/data_128/%d'% y
+        cls = torch.load(os.path.join(loca, 'cls_labels_paper3.pt'))
+        class_idx = []
+        for i in range(3):
+            class_idx.append(np.argwhere(np.asarray(cls)==i))
+        year_patch_idx.append(class_idx)
+    return year_patch_idx
+
+def count_fish_pixels(year_patch_idx, years):
+    years_pixel_count = []
+    for idx, ycs in enumerate(year_patch_idx):
+        if len(ycs) == 2:
+            ycs.insert(0, [])
+        y = years[idx]
+        loca = '/Users/changkyu/Documents/GitHub/semisup_seg_data/data_128/%d'% y
+        segs = torch.load(os.path.join(loca, 'seg_labels_paper3.pt'))
+        year_count = []
+        for cl, cs in enumerate(ycs):
+            if cl > 0:
+                print(y, cl, len(cs))
+                seg_cl = np.asarray(segs)[cs]
+                ycount = []
+                for seg in seg_cl:
+                    ycount.append(np.sum(seg==cl))
+                year_count.append(ycount)
+        years_pixel_count.append(year_count)
+
+    for idx, ycs in enumerate(years_pixel_count):
+        for cdx, yc in enumerate(ycs):
+            if len(yc) == 0:
+                continue
+            else:
+                print(years[idx], cdx+1, 'min {:.1f}, median {:.1f}, mean {:.1f}, max{:.1f}'.format(np.min(yc), np.median(yc), np.mean(yc), np.max(yc)))
+    return years_pixel_count
+
+def keep_some_fish_patches(years_pixel_count, years_patch_idx, years, low_threshold=24, high_threshold=8193):
+    keep_year_patch_idx = []
+    drop_year_patch_idx = []
+    for yidx, y_pixel_count in enumerate(years_pixel_count):
+        keep_idx_save = []
+        drop_idx_save = []
+        for cidx, c_pixel_count in enumerate(y_pixel_count):
+            keep_idx = []
+            drop_idx = []
+            for i, px in enumerate(c_pixel_count):
+                if (px >= low_threshold) and (px < high_threshold):
+                    keep_idx.append(i)
+                else:
+                    drop_idx.append(i)
+            keep_idx_save.append(np.asarray(years_patch_idx[yidx][cidx+1])[keep_idx])
+            drop_idx_save.append(np.asarray(years_patch_idx[yidx][cidx+1])[drop_idx])
+            print(yidx, years[yidx], cidx, '\tkeep: ', len(keep_idx), '\tdrop: ', len(drop_idx), '\t', low_threshold, high_threshold)
+        keep_year_patch_idx.append(keep_idx_save)
+        drop_year_patch_idx.append(drop_idx_save)
+    return keep_year_patch_idx, drop_year_patch_idx
+
+
+def count_keep_patches(keep_years_patch_idx):
+    keep_patch_count = []
+    for y_patch_idx in keep_years_patch_idx:
+        y_count = []
+        for c_patch_idx in y_patch_idx:
+            y_count.append(len(c_patch_idx))
+        keep_patch_count.append(y_count)
+    return np.asarray(keep_patch_count)
+
+
+def sample_patch_idx(keep_years_patch_idx, drop_years_patch_idx, year_patch_idx, overview, num_classes=3):
+    final_keep_patch_idx = []
+    for y_idx in range(len(overview)):
+        y_final_keep_patch_idx = []
+        if len(drop_years_patch_idx[y_idx]) == 2:
+            drop_years_patch_idx[y_idx].insert(0, [])
+        for c_idx in range(num_classes):
+            if c_idx == 0:
+                t = np.asarray(year_patch_idx[y_idx][c_idx])
+            else:
+                t = np.asarray(keep_years_patch_idx[y_idx][c_idx])
+            np.random.shuffle(t)
+            crit = overview[y_idx][c_idx]
+            keep_idx, drop_idx = t[:crit].tolist(), t[crit:].tolist()
+            print(y_idx, c_idx)
+            if type(drop_years_patch_idx[y_idx][c_idx]) is not list:
+                drop_years_patch_idx[y_idx][c_idx] = drop_years_patch_idx[y_idx][c_idx].tolist()
+            drop_years_patch_idx[y_idx][c_idx].extend(drop_idx)
+            y_final_keep_patch_idx.append(keep_idx)
+        final_keep_patch_idx.append(y_final_keep_patch_idx)
+    return final_keep_patch_idx, drop_years_patch_idx
+
+
+def get_final_patch(final_count, years):
+    num_classes = 3
+    d_c0 = []
+    d_c1 = []
+    d_c2 = []
+    seg_c0 = []
+    seg_c1 = []
+    seg_c2 = []
+    cls_c0 = []
+    cls_c1 = []
+    cls_c2 = []
+    for i, fc in enumerate(final_count):
+        y = years[i]
+        y_loca = '/Users/changkyu/Documents/GitHub/semisup_seg_data/data_128/%d'% y
+        y_data = torch.load(os.path.join(y_loca, 'data_paper3.pt'))
+        y_segs = torch.load(os.path.join(y_loca, 'seg_labels_paper3.pt'))
+        y_cls = torch.load(os.path.join(y_loca, 'cls_labels_paper3.pt'))
+        for c in range(num_classes):
+            p_idx = np.asarray(fc[c]).squeeze()
+            for p in p_idx:
+                if c == 0:
+                    d_c0.append(np.asarray(y_data[p])/37.5)
+                    seg_c0.append(y_segs[p])
+                    cls_c0.append(y_cls[p])
+                if c == 1:
+                    d_c1.append(np.asarray(y_data[p])/37.5)
+                    seg_c1.append(y_segs[p])
+                    cls_c1.append(y_cls[p])
+                if c == 2:
+                    d_c2.append(np.asarray(y_data[p])/37.5)
+                    seg_c2.append(y_segs[p])
+                    cls_c2.append(y_cls[p])
+    d = []
+    seg = []
+    cls = []
+    for i in range(len(cls_c0)):
+        d.append(d_c0[i])
+        d.append(d_c1[i])
+        d.append(d_c2[i])
+        seg.append(seg_c0[i])
+        seg.append(seg_c1[i])
+        seg.append(seg_c2[i])
+        cls.append(cls_c0[i])
+        cls.append(cls_c1[i])
+        cls.append(cls_c2[i])
+    return d, seg, cls
+
+tr_year_patch_idx = idx_samplers(tr_years)
+tr_years_pixel_count = count_fish_pixels(tr_year_patch_idx, tr_years)
+tr_keep_years_patch_idx, tr_drop_years_patch_idx = keep_some_fish_patches(tr_years_pixel_count, tr_year_patch_idx, tr_years)
+tr_keep_years_pixel_count = count_fish_pixels(tr_keep_years_patch_idx, tr_years)
+tr_keep_patch_count = count_keep_patches(tr_keep_years_patch_idx)
+tr_final_keep_patch_idx, tr_final_drop_patch_idx = sample_patch_idx(tr_keep_years_patch_idx, tr_drop_years_patch_idx, tr_year_patch_idx, tr_overview)
+tr_fk_count = count_keep_patches(tr_final_keep_patch_idx)
+tr_fd_count = count_keep_patches(tr_final_drop_patch_idx)
+print('\n', tr_fk_count, '\n\n', tr_fd_count)
+tr_d, tr_seg, tr_cl = get_final_patch(tr_final_keep_patch_idx, tr_years)
+
+te_year_patch_idx = idx_samplers(te_years)
+te_years_pixel_count = count_fish_pixels(te_year_patch_idx, te_years)
+te_keep_years_patch_idx, te_drop_years_patch_idx = keep_some_fish_patches(te_years_pixel_count, te_year_patch_idx, te_years)
+te_keep_years_pixel_count = count_fish_pixels(te_keep_years_patch_idx, te_years)
+te_keep_patch_count = count_keep_patches(te_keep_years_patch_idx)
+te_final_keep_patch_idx, te_final_drop_patch_idx = sample_patch_idx(te_keep_years_patch_idx, te_drop_years_patch_idx, te_year_patch_idx, te_overview)
+te_fk_count = count_keep_patches(te_final_keep_patch_idx)
+te_fd_count = count_keep_patches(te_final_drop_patch_idx)
+print('\n', te_fk_count, '\n\n', te_fd_count)
+te_d, te_seg, te_cl = get_final_patch(te_final_keep_patch_idx, te_years)
+
+
+y_loca = '/Users/changkyu/Documents/GitHub/semisup_seg_data/data_128/'
+torch.save(tr_d, os.path.join(y_loca, 'echo_data_tr_paper3.pt'))
+torch.save(tr_seg, os.path.join(y_loca, 'echo_seg_tr_paper3.pt'))
+torch.save(tr_cl, os.path.join(y_loca, 'echo_label_tr_paper3.pt'))
+torch.save(tr_final_keep_patch_idx, os.path.join(y_loca, 'echo_keep_patch_idx_tr_paper3.pt'))
+torch.save(tr_final_drop_patch_idx, os.path.join(y_loca, 'echo_drop_patch_idx_tr_paper3.pt'))
+
+torch.save(te_d, os.path.join(y_loca, 'echo_data_te_paper3.pt'))
+torch.save(te_seg, os.path.join(y_loca, 'echo_seg_te_paper3.pt'))
+torch.save(te_cl, os.path.join(y_loca, 'echo_label_te_paper3.pt'))
+torch.save(te_final_keep_patch_idx, os.path.join(y_loca, 'echo_keep_patch_idx_te_paper3.pt'))
+torch.save(te_final_drop_patch_idx, os.path.join(y_loca, 'echo_drop_patch_idx_te_paper3.pt'))
+'''
+
+
+'''
+########################################################################
+########################################################################
+########################################################################
+
+from skimage.measure import block_reduce
+import cv2
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
+import os
+
+y_loca = '/Users/changkyu/Documents/GitHub/semisup_seg_data/data_128/'
+tr_d = torch.load(os.path.join(y_loca, 'echo_data_tr_paper3.pt'))
+tr_seg = torch.load(os.path.join(y_loca, 'echo_seg_tr_paper3.pt'))
+tr_cl = torch.load(os.path.join(y_loca, 'echo_label_tr_paper3.pt'))
+tr_echo_prior_pool4 = torch.load(os.path.join(y_loca, 'echo_prior_pooled_4x_tr_paper3.pt'))
+tr_echo_prior = torch.load(os.path.join(y_loca, 'echo_prior_tr_paper3.pt'))
+
+te_d = torch.load(os.path.join(y_loca, 'echo_data_te_paper3.pt'))
+te_seg = torch.load(os.path.join(y_loca, 'echo_seg_te_paper3.pt'))
+te_cl = torch.load(os.path.join(y_loca, 'echo_label_te_paper3.pt'))
+te_echo_prior_pool4 = torch.load(os.path.join(y_loca, 'echo_prior_pooled_4x_te_paper3.pt'))
+te_echo_prior = torch.load(os.path.join(y_loca, 'echo_prior_te_paper3.pt'))
+
+########################################################################
+def mask_prior_creator(x, pool_size=(1, 4, 4), thresholds=[0.32, 0.32, 0.32, 0.32]):
+    k_d = 7
+    k_e = 3
+    x_thres = 1.4
+    kernel_d = np.ones((k_d, k_d), np.uint8)
+    kernel_e = np.ones((k_e, k_e), np.uint8)
+    d_im = cv2.dilate(np.float32(x.mean(0) > x_thres), kernel_d, iterations=1)
+    e_im = cv2.erode(d_im, kernel_e, iterations=1)
+
+    prior = np.zeros_like(x)
+    for k, thres in enumerate(thresholds):
+        prior[k][np.where(x[k] > thres)] = 1
+        prior[k][e_im==1] = 0
+    prior_pool = block_reduce(prior, block_size=pool_size, func=np.max)
+    return prior_pool, prior
+
+echo_prior_pool4 = []
+echo_prior = []
+for x in tr_d:
+    p_pool, p = mask_prior_creator(x)
+    echo_prior_pool4.append(p_pool)
+    echo_prior.append(p)
+torch.save(echo_prior_pool4, os.path.join(y_loca, 'echo_prior_pooled_4x_tr_paper3.pt'))
+torch.save(echo_prior, os.path.join(y_loca, 'echo_prior_tr_paper3.pt'))
+
+
+echo_prior_pool4 = []
+echo_prior = []
+for x in te_d:
+    p_pool, p = mask_prior_creator(x)
+    echo_prior_pool4.append(p_pool)
+    echo_prior.append(p)
+torch.save(echo_prior_pool4, os.path.join(y_loca, 'echo_prior_pooled_4x_te_paper3.pt'))
+torch.save(echo_prior, os.path.join(y_loca, 'echo_prior_te_paper3.pt'))
+
+'''
+
+'''
+########################################################################
+
+num_sample = 120
+n_col = 12
+n_row = num_sample//n_col
+plt.close()
+fig, ax = plt.subplots(n_row, n_col, figsize=(2*n_row, 2*n_col), sharex=True, sharey=True)
+for i in range(num_sample):
+    row = i // n_col
+    col = i % n_col
+    ax[row, col].imshow(tr_d[i][-1])
+    ax[row, col].set_title(tr_cl[i])
+plt.tight_layout()
+plt.savefig('tr_d_%d.png' % num_sample)
+
+num_sample = 120
+n_col = 12
+n_row = num_sample//n_col
+plt.close()
+fig, ax = plt.subplots(n_row, n_col, figsize=(2*n_row, 2*n_col), sharex=True, sharey=True)
+for i in range(num_sample):
+    row = i // n_col
+    col = i % n_col
+    ax[row, col].imshow(tr_seg[i], vmax=2)
+    ax[row, col].set_title(tr_cl[i])
+plt.tight_layout()
+plt.savefig('tr_seg_%d.png' % num_sample)
+
+num_sample = 120
+n_col = 12
+n_row = num_sample//n_col
+plt.close()
+fig, ax = plt.subplots(n_row, n_col, figsize=(2*n_row, 2*n_col), sharex=True, sharey=True)
+for i in range(num_sample):
+    row = i // n_col
+    col = i % n_col
+    ax[row, col].imshow(tr_echo_prior_pool4[i][-1], vmax=1)
+    ax[row, col].set_title(tr_cl[i])
+plt.tight_layout()
+plt.savefig('tr_mp_%d.png' % num_sample)
+
+num_sample = 120
+n_col = 12
+n_row = num_sample//n_col
+plt.close()
+fig, ax = plt.subplots(n_row, n_col, figsize=(2*n_row, 2*n_col), sharex=True, sharey=True)
+for i in range(num_sample):
+    row = i // n_col
+    col = i % n_col
+    ax[row, col].imshow(tr_echo_prior[i][-1], vmax=1)
+    ax[row, col].set_title(tr_cl[i])
+plt.tight_layout()
+plt.savefig('tr_m_%d.png' % num_sample)
+
+
+
+def mask_plot(d, seg, echo_prior, echo_prior_pool4, cl, num_samples, filename):
+    plt.close()
+    n_row = 4
+    fig = plt.figure(figsize=(2*num_samples, 2*n_row))
+    for i, (x, s, m, mp, c) in enumerate(zip(d, seg, echo_prior, echo_prior_pool4, cl)):
+        if i == num_samples:
+            break
+        xx = fig.add_subplot(n_row, num_samples, i + 1)
+        xx.imshow(x[-1], vmax=2)
+        xx.set_title(c)
+        xx.set_xticks([])
+        xx.set_yticks([])
+
+        ss = fig.add_subplot(n_row, num_samples, num_samples + i + 1)
+        ss.imshow(s, vmax=2)
+        ss.set_title(c)
+        ss.set_xticks([])
+        ss.set_yticks([])
+
+        mm = fig.add_subplot(n_row, num_samples, num_samples * 2 + i + 1)
+        mm.imshow(m[-1], vmax=1)
+        mm.set_title(c)
+        mm.set_xticks([])
+        mm.set_yticks([])
+
+        mpmp = fig.add_subplot(n_row, num_samples, num_samples * 3 + i + 1)
+        mpmp.imshow(mp[-1], vmax=1)
+        mpmp.set_title(c)
+        mpmp.set_xticks([])
+        mpmp.set_yticks([])
+
+    plt.tight_layout()
+    plt.savefig(filename)
+
+
+
+    # n_row = 4
+    # fig, ax = plt.subplots(n_row, num_samples, sharex=True, sharey=True, figsize=(2*num_samples, 2*n_row))
+    # for i, (x, s, m, mp, c) in enumerate(zip(d, seg, echo_prior, echo_prior_pool4, cl)):
+    #     if i == num_samples:
+    #         break
+    #     ax[0, i].imshow(x[-1], vmax=2)
+    #     ax[0, i].set_title(c)
+    #     ax[1, i].imshow(s, vmax=2)
+    #     ax[1, i].set_title(c)
+    #     ax[2, i].imshow(m[-1], vmax=1)
+    #     ax[2, i].set_title(c)
+    #     ax[3, i].imshow(mp[-1], vmax=1)
+    #     ax[3, i].set_title(c)
+    # plt.tight_layout()
+    # plt.savefig(filename)
+
+'''
