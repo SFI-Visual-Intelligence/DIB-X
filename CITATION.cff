@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+title: 'DIB-X: Formulating Explainability Principles for a Self-Explainable Model Through Information Theoretic Learning'
+authors:
+  - family-names: "Visual Intelligence"
+    name-particle: ""
+    given-names: "SFI"
+keywords:
+  - explainability
+  - information-theory
+  - self-explainable
+license: MIT
+repository-code: "https://github.com/SFI-Visual-Intelligence/DIB-X"
+type: software
