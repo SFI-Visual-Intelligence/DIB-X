@@ -1,3 +1,5 @@
+Paper: DIB-X: Formulating Explainability Principles for a Self-Explainable Model Through Information Theoretic Learning ([Link](https://api.nva.unit.no/publication/0198cc4071e6-1898b38d-58b5-46c0-a043-65fd9fef9d9a))
+
 # DIB-X: Formulating Explainability Principles for a Self-Explainable Model Through Information Theoretic Learning
 
 ## Overview
